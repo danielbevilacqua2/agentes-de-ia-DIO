@@ -1,0 +1,173 @@
+# @title Agente de Detecção de Vulnerabilidades para Google Colab
+# Adaptado do projeto: https://github.com/HugoAPortela/Criando-Agente-Deteccao-Vulnerabilidades-Arquiteturas
+
+# Passo 1: Instalar as bibliotecas necessárias
+# Este comando instala todas as dependências do projeto no ambiente do Colab.
+!pip install crewai crewai_tools langchain_groq beautifulsoup4
+
+print("\n--- Bibliotecas instaladas com sucesso! ---")
+
+# Passo 2: Importar os módulos necessários
+import os
+from getpass import getpass
+from crewai import Agent, Task, Crew, Process
+from crewai_tools import ScrapeWebsiteTool
+from langchain_groq import ChatGroq
+
+print("\n--- Módulos importados com sucesso! ---")
+
+# Passo 3: Configurar a Chave de API do Groq
+# Usamos getpass para que você possa colar sua chave de API de forma segura,
+# sem que ela fique visível no código.
+# Você pode obter sua chave em: https://console.groq.com/keys
+try:
+    groq_api_key = getpass('Por favor, insira sua GROQ_API_KEY: ')
+    os.environ["GROQ_API_KEY"] = groq_api_key
+    print("\n--- Chave de API configurada com sucesso! ---")
+except Exception as e:
+    print(f"\nErro ao configurar a chave de API: {e}")
+    # Interrompe a execução se a chave não for fornecida
+    raise SystemExit("A chave de API é necessária para continuar.")
+
+
+# Passo 4: Inicializar o Modelo de Linguagem (LLM)
+# Estamos usando o Llama 3 através da API do Groq, que é conhecida por sua alta velocidade.
+llm = ChatGroq(model_name="llama3-8b-8192")
+print(f"\n--- LLM '{llm.model_name}' inicializado. ---")
+
+# Passo 5: Inicializar as ferramentas
+# A ferramenta ScrapeWebsiteTool permite que os agentes acessem e leiam o conteúdo de URLs.
+scrape_tool = ScrapeWebsiteTool()
+print("\n--- Ferramentas inicializadas. ---")
+
+
+# Passo 6: Definir os Agentes da equipe
+# Cada agente tem um papel, um objetivo e uma história de fundo (backstory)
+# que o ajuda a entender seu contexto e a executar suas tarefas de forma mais eficaz.
+
+# Agente 1: Analista de Arquitetura de Software
+analista_arquitetura = Agent(
+    role="Analista de Arquitetura de Software",
+    goal="Analisar a arquitetura de software a partir da documentação fornecida na URL e identificar seus componentes chave.",
+    backstory=(
+        "Você é um experiente analista de arquitetura de software com um olhar atento aos detalhes. "
+        "Sua especialidade é dissecar documentações complexas para extrair a essência da estrutura "
+        "de um sistema, identificando tecnologias, padrões e fluxos de dados."
+    ),
+    verbose=True,
+    allow_delegation=False,
+    tools=[scrape_tool],
+    llm=llm
+)
+
+# Agente 2: Especialista em Segurança
+especialista_seguranca = Agent(
+    role="Especialista em Segurança de Aplicações",
+    goal="Identificar potenciais vulnerabilidades de segurança na arquitetura de software analisada.",
+    backstory=(
+        "Como um hacker ético e especialista em segurança, você tem um profundo conhecimento sobre "
+        "vetores de ataque e falhas de segurança comuns em diferentes tecnologias e arquiteturas. "
+        "Seu trabalho é antecipar como um sistema pode ser explorado, com base em sua estrutura."
+    ),
+    verbose=True,
+    allow_delegation=False,
+    llm=llm
+)
+
+# Agente 3: Compilador de Relatório
+compilador_relatorio = Agent(
+    role="Compilador de Relatório Técnico",
+    goal="Compilar as análises de arquitetura e segurança em um relatório final claro, conciso e acionável.",
+    backstory=(
+        "Você é um escritor técnico com habilidade para traduzir informações complexas em relatórios "
+        "bem estruturados. Seu objetivo é garantir que as descobertas sejam apresentadas de forma "
+        "lógica, destacando os pontos críticos e fornecendo recomendações claras."
+    ),
+    verbose=True,
+    allow_delegation=False,
+    llm=llm
+)
+
+print("\n--- Agentes criados com sucesso! ---")
+print(f"\t- {analista_arquitetura.role}")
+print(f"\t- {especialista_seguranca.role}")
+print(f"\t- {compilador_relatorio.role}")
+
+
+# Passo 7: Definir as Tarefas
+# Cada tarefa é atribuída a um agente e descreve o que precisa ser feito.
+# O 'context' de uma tarefa pode depender do resultado de outra, criando um fluxo de trabalho.
+
+# Tarefa 1: Análise da Arquitetura
+analise_arquitetura_task = Task(
+    description=(
+        "1. Acesse a URL fornecida: {url}\n"
+        "2. Leia todo o conteúdo para entender a arquitetura do software.\n"
+        "3. Identifique e liste os principais componentes, tecnologias (linguagens, bancos de dados, frameworks), "
+        "e como eles se interconectam.\n"
+        "4. Forneça um resumo da arquitetura para ser usado pelo especialista em segurança."
+    ),
+    expected_output="Um resumo detalhado da arquitetura de software, listando componentes, tecnologias e fluxos de dados.",
+    agent=analista_arquitetura
+)
+
+# Tarefa 2: Identificação de Vulnerabilidades
+identificar_vulnerabilidades_task = Task(
+    description=(
+        "1. Use o resumo da arquitetura fornecido pela tarefa anterior.\n"
+        "2. Para cada componente e tecnologia listada, identifique potenciais vulnerabilidades de segurança "
+        "(ex: SQL Injection, XSS, falhas de configuração, bibliotecas desatualizadas).\n"
+        "3. Classifique as vulnerabilidades por nível de risco (Crítico, Alto, Médio, Baixo).\n"
+        "4. Forneça uma lista clara das vulnerabilidades encontradas e por que elas representam um risco."
+    ),
+    expected_output="Uma lista de potenciais vulnerabilidades de segurança, classificadas por risco, com uma breve explicação para cada uma.",
+    agent=especialista_seguranca,
+    context=[analise_arquitetura_task] # Esta tarefa depende do resultado da anterior
+)
+
+# Tarefa 3: Compilação do Relatório Final
+compilar_relatorio_task = Task(
+    description=(
+        "1. Reúna o resumo da arquitetura e a lista de vulnerabilidades das tarefas anteriores.\n"
+        "2. Estruture um relatório final com as seguintes seções:\n"
+        "   - Resumo da Arquitetura\n"
+        "   - Vulnerabilidades Identificadas (com classificação de risco)\n"
+        "   - Recomendações (sugira ações para mitigar cada vulnerabilidade encontrada)\n"
+        "   - Conclusão\n"
+        "3. O relatório deve ser claro, profissional e fácil de entender."
+    ),
+    expected_output="Um relatório de segurança completo e bem formatado em formato Markdown.",
+    agent=compilador_relatorio,
+    context=[analise_arquitetura_task, identificar_vulnerabilidades_task] # Depende das duas tarefas anteriores
+)
+
+print("\n--- Tarefas definidas com sucesso! ---")
+
+
+# Passo 8: Montar e Executar a Equipe (Crew)
+# A 'Crew' orquestra o trabalho dos agentes, executando as tarefas na ordem correta.
+
+# Solicitar a URL ao usuário
+print("\n--- INICIANDO PROCESSO DE ANÁLISE ---")
+url_arquitetura = input("Por favor, insira a URL da documentação da arquitetura que você deseja analisar: ")
+
+if not url_arquitetura:
+    print("URL não fornecida. Encerrando o processo.")
+else:
+    # Criar a equipe com os agentes e tarefas
+    crew = Crew(
+        agents=[analista_arquitetura, especialista_seguranca, compilador_relatorio],
+        tasks=[analise_arquitetura_task, identificar_vulnerabilidades_task, compilar_relatorio_task],
+        process=Process.sequential,  # As tarefas serão executadas em sequência
+        verbose=2 # Nível de detalhe do log de execução
+    )
+
+    # Iniciar o trabalho da equipe
+    # O dicionário fornece os parâmetros iniciais para as tarefas.
+    resultado = crew.kickoff(inputs={'url': url_arquitetura})
+
+    # Exibir o resultado final
+    print("\n\n########################################")
+    print("## RELATÓRIO FINAL DE VULNERABILIDADES ##")
+    print("########################################\n")
+    print(resultado)
